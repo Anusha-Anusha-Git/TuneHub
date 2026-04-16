@@ -1,0 +1,95 @@
+@charset "UTF-8";
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f8f9fc;
+}
+
+/* HERO */
+.hero {
+  background: linear-gradient(135deg, #1e1e2f, #3a3a6a);
+  color: white;
+  padding: 80px 20px;
+  text-align: center;
+}
+
+.hero-container {
+  max-width: 800px;
+  margin: auto;
+}
+
+.hero-badge {
+  background: rgba(255,255,255,0.1);
+  padding: 6px 12px;
+  border-radius: 20px;
+  display: inline-block;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.hero-title {
+  font-size: 40px;
+  margin: 0;
+}
+
+.highlight {
+  color: #00d4ff;
+}
+
+.hero-subtitle {
+  margin-top: 15px;
+  color: #ccc;
+}
+
+/* Button */
+.btn {
+  display: inline-block;
+  padding: 12px 20px;
+  margin-top: 20px;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.primary {
+  background: #00d4ff;
+  color: black;
+  font-weight: bold;
+}
+
+/* FEATURES */
+.features {
+  padding: 60px 20px;
+}
+
+.features-container {
+  max-width: 1000px;
+  margin: auto;
+}
+
+.features-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.feature-card {
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+  text-align: center;
+  transition: 0.3s;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+}
+
+.icon {
+  font-size: 30px;
+  margin-bottom: 10px;
+}
