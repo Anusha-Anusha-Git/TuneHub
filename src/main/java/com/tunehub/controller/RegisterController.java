@@ -1,74 +1,126 @@
 package com.tunehub.controller;
 
-import jakarta.servlet.ServletException;
-import com.tunehub.config.DBConfig;
-import jakarta.servlet.annotation.WebServlet;
-import jakarta.servlet.http.*;
-
 import java.io.IOException;
-import java.sql.*;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.Base64;
 
-/**
- * Servlet implementation class RegisterController
- */
-@WebServlet("/RegisterController")
+import com.tunehub.config.DBConfig;
+
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+@WebServlet("/register")
 public class RegisterController extends HttpServlet {
-	private static final long serialVersionUID = 1L;
-       
-    /**
-     * @see HttpServlet#HttpServlet()
-     */
-    public RegisterController() {
-        super();
-        // TODO Auto-generated constructor stub
+
+    private static String hashPassword(String password, String salt) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        md.update(salt.getBytes());
+        return Base64.getEncoder().encodeToString(md.digest(password.getBytes()));
     }
 
-	/**
-	 * @see HttpServlet#doGet(HttpServletRequest request, HttpServletResponse response)
-	 */
-	protected void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-		// TODO Auto-generated method stub
-		request.getRequestDispatcher("WEB-INF/Pages/register.jsp").forward(request, response);	
-	}
+    private static String generateSalt() {
+        byte[] salt = new byte[16];
+        new SecureRandom().nextBytes(salt);
+        return Base64.getEncoder().encodeToString(salt);
+    }
 
-	/**
-	 * @see HttpServlet#doPost(HttpServletRequest request, HttpServletResponse response)
-	 */
-	protected void doPost(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-		String name = request.getParameter("name");
-        String email = request.getParameter("email");
+    private static boolean isValidEmail(String e) {
+        return e != null && e.matches("^[A-Za-z0-9+_.-]+@(.+)$");
+    }
+
+    private static boolean isValidUsername(String u) {
+        return u != null && u.matches("^[a-zA-Z0-9_]{3,20}$");
+    }
+
+    private static String sanitize(String s) {
+        return s == null ? "" : s.trim().replaceAll("[<>\"'&]", "");
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) 
+            throws ServletException, IOException {
+        
+        String username = sanitize(request.getParameter("username"));
+        String email = sanitize(request.getParameter("email"));
         String password = request.getParameter("password");
-        String role = request.getParameter("role");
+        String confirm = request.getParameter("confirmPassword");
 
-        try (Connection con = DBConfig.getConnection()) {
+        if (!isValidUsername(username)) {
+            request.setAttribute("error", "Username: 3-20 alphanumeric characters");
+            forwardWithInput(request, response, username, email);
+            return;
+        }
+        if (!isValidEmail(email)) {
+            request.setAttribute("error", "Please enter a valid email");
+            forwardWithInput(request, response, username, email);
+            return;
+        }
+        if (password == null || password.length() < 6) {
+            request.setAttribute("error", "Password must be at least 6 characters");
+            forwardWithInput(request, response, username, email);
+            return;
+        }
+        if (!password.equals(confirm)) {
+            request.setAttribute("error", "Passwords do not match");
+            forwardWithInput(request, response, username, email);
+            return;
+        }
 
-            // Check if email already exists
-            PreparedStatement check = con.prepareStatement("SELECT id FROM users WHERE email = ?");
-            check.setString(1, email);
-            ResultSet existing = check.executeQuery();
-
-            if (existing.next()) {
-                request.setAttribute("error", "An account with that email already exists.");
-                request.getRequestDispatcher("/WEB-INF/Pages/register.jsp").forward(request, response);
+        try (Connection conn = DBConfig.getConnection()) {
+            if (exists(conn, "username", username) || exists(conn, "email", email)) {
+                request.setAttribute("error", "Username or email already taken");
+                forwardWithInput(request, response, username, email);
                 return;
             }
 
-            String sql = "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)";
-            PreparedStatement ps = con.prepareStatement(sql);
-            ps.setString(1, name);
+            String salt = generateSalt();
+            String hash = hashPassword(password, salt);
+
+            PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO users (username, email, password_hash, salt, role, created_at) VALUES (?, ?, ?, ?, 'user', NOW())");
+            ps.setString(1, username);
             ps.setString(2, email);
-            ps.setString(3, password);
-            ps.setString(4, role);
-            ps.executeUpdate();
+            ps.setString(3, hash);
+            ps.setString(4, salt);
 
-            // BUG FIX: redirect to LoginController (servlet), NOT login.jsp directly
-            response.sendRedirect("LoginController?registered=true");
-
+            if (ps.executeUpdate() > 0) {
+                request.setAttribute("success", "Registration successful! Please login.");
+                request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
+            } else {
+                request.setAttribute("error", "Registration failed");
+                forwardWithInput(request, response, username, email);
+            }
         } catch (Exception e) {
             e.printStackTrace();
             request.setAttribute("error", "Registration failed. Please try again.");
-            request.getRequestDispatcher("/WEB-INF/Pages/register.jsp").forward(request, response);
+            forwardWithInput(request, response, username, email);
         }
     }
 
+    private boolean exists(Connection conn, String col, String val) throws Exception {
+        PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM users WHERE " + col + " = ?");
+        ps.setString(1, val);
+        ResultSet rs = ps.executeQuery();
+        return rs.next() && rs.getInt(1) > 0;
+    }
+
+    private void forwardWithInput(HttpServletRequest request, HttpServletResponse response, String u, String e) 
+            throws ServletException, IOException {
+        request.setAttribute("username", u);
+        request.setAttribute("email", e);
+        request.getRequestDispatcher("/WEB-INF/Pages/register.jsp").forward(request, response);
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response) 
+            throws ServletException, IOException {
+        request.getRequestDispatcher("/WEB-INF/Pages/register.jsp").forward(request, response);
+    }
 }
