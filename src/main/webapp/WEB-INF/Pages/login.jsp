@@ -7,6 +7,7 @@
     <title>Login - TuneHub</title>
     
     <style>
+    
         /* ===== EXACT THEME VARIABLES (Matches Index) ===== */
         :root {
             --bg-base: #000000;

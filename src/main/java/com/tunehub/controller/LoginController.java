@@ -1,125 +1,107 @@
 package com.tunehub.controller;
 
 import java.io.IOException;
-import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.util.Base64;
-
+import java.sql.Timestamp;
+import java.util.Date;
 import com.tunehub.config.DBConfig;
 import com.tunehub.model.User;
-
-import jakarta.servlet.ServletException;
-import jakarta.servlet.annotation.WebServlet;
-import jakarta.servlet.http.HttpServlet;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
+import jakarta.servlet.*;
+import jakarta.servlet.annotation.*;
+import jakarta.servlet.http.*;
 
 @WebServlet("/login")
 public class LoginController extends HttpServlet {
-
-    private static String hashPassword(String password, String salt) throws Exception {
-        MessageDigest md = MessageDigest.getInstance("SHA-256");
-        md.update(salt.getBytes());
-        byte[] hashed = md.digest(password.getBytes());
-        return Base64.getEncoder().encodeToString(hashed);
-    }
-
-    private static String sanitize(String s) {
-        return s == null ? "" : s.trim().replaceAll("[<>\"'&]", "");
-    }
+    private static final long serialVersionUID = 1L;
 
     @Override
-    protected void doPost(HttpServletRequest request, HttpServletResponse response) 
-            throws ServletException, IOException {
-        
-        String identifier = sanitize(request.getParameter("identifier"));
-        String password = request.getParameter("password");
+    protected void doPost(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
+        String id = req.getParameter("identifier") != null ? req.getParameter("identifier").trim() : "";
+        String pwd = req.getParameter("password") != null ? req.getParameter("password") : "";
 
-        if (identifier.isEmpty() || password == null || password.isEmpty()) {
-            request.setAttribute("error", "Please fill in all fields");
-            request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
+        if (id.isEmpty() || pwd.isEmpty()) {
+            req.setAttribute("error", "Please enter username/email and password.");
+            req.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(req, res);
             return;
         }
 
-        try (Connection conn = DBConfig.getConnection()) {
-            String sql = "SELECT * FROM users WHERE (username = ? OR email = ?)";
-            PreparedStatement ps = conn.prepareStatement(sql);
-            ps.setString(1, identifier);
-            ps.setString(2, identifier);
+        Connection conn = null;
+        try {
+            conn = DBConfig.getConnection();
+            PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE username=? OR email=?");
+            ps.setString(1, id);
+            ps.setString(2, id);
             ResultSet rs = ps.executeQuery();
 
-            if (rs.next()) {
-                User user = new User();
-                user.setId(rs.getInt("id"));
-                user.setUsername(rs.getString("username"));
-                user.setEmail(rs.getString("email"));
-                user.setPasswordHash(rs.getString("password_hash"));
-                user.setSalt(rs.getString("salt"));
-                user.setRole(rs.getString("role"));
-                user.setFailedLoginAttempts(rs.getInt("failed_login_attempts"));
-                user.setLocked(rs.getBoolean("locked"));
+            if (!rs.next()) {
+                req.setAttribute("error", "User not found.");
+                req.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(req, res);
+                return;
+            }
 
-                if (user.isLocked()) {
-                    request.setAttribute("error", "Account locked. Contact administrator.");
-                    request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
-                    return;
-                }
+            User u = new User();
+            u.setId(rs.getInt("user_id"));
+            u.setUsername(rs.getString("username"));
+            u.setEmail(rs.getString("email"));
+            u.setPasswordHash(rs.getString("password"));
+            u.setRole(rs.getString("role"));
+            u.setFailedAttempts(rs.getInt("failed_attempts"));
+            u.setLockedUntil(rs.getTimestamp("locked_until"));
 
-                String inputHash = hashPassword(password, user.getSalt());
-                if (inputHash.equals(user.getPasswordHash())) {
-                    PreparedStatement reset = conn.prepareStatement(
-                        "UPDATE users SET failed_login_attempts = 0, locked = false WHERE id = ?");
-                    reset.setInt(1, user.getId());
-                    reset.executeUpdate();
+            // 🔒 Check account lockout
+            if (u.getLockedUntil() != null && new Date().before(u.getLockedUntil())) {
+                req.setAttribute("error", "Account locked. Try again later.");
+                req.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(req, res);
+                return;
+            }
 
-                    HttpSession session = request.getSession(true);
-                    session.setAttribute("user", user);
-                    session.setMaxInactiveInterval(30 * 60);
+            // ✅ Plain text password comparison
+            if (pwd.equals(u.getPasswordHash())) {
+                PreparedStatement reset = conn.prepareStatement("UPDATE users SET failed_attempts=0, locked_until=NULL WHERE user_id=?");
+                reset.setInt(1, u.getId());
+                reset.executeUpdate();
 
-                    if ("admin".equals(user.getRole())) {
-                        response.sendRedirect(request.getContextPath() + "/admin");
-                    } else {
-                        response.sendRedirect(request.getContextPath() + "/profile");
-                    }
+                HttpSession session = req.getSession(true);
+                session.setAttribute("user", u);
+                session.setMaxInactiveInterval(1800); // 30 mins
+
+                if ("admin".equals(u.getRole())) {
+                    res.sendRedirect(req.getContextPath() + "/admin");
                 } else {
-                    int attempts = user.getFailedLoginAttempts() + 1;
-                    boolean lock = attempts >= 3;
-                    PreparedStatement update = conn.prepareStatement(
-                        "UPDATE users SET failed_login_attempts = ?, locked = ? WHERE id = ?");
-                    update.setInt(1, attempts);
-                    update.setBoolean(2, lock);
-                    update.setInt(3, user.getId());
-                    update.executeUpdate();
-
-                    String msg = "Invalid credentials. ";
-                    msg += lock ? "Account locked. Contact administrator." : (3 - attempts) + " attempts remaining";
-                    request.setAttribute("error", msg);
-                    request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
+                    res.sendRedirect(req.getContextPath() + "/profile");
                 }
             } else {
-                request.setAttribute("error", "User not found");
-                request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
+                int attempts = u.getFailedAttempts() + 1;
+                Timestamp lockTime = (attempts >= 3) ? new Timestamp(System.currentTimeMillis() + 15 * 60 * 1000) : null;
+                
+                PreparedStatement update = conn.prepareStatement("UPDATE users SET failed_attempts=?, locked_until=? WHERE user_id=?");
+                update.setInt(1, attempts);
+                update.setTimestamp(2, lockTime);
+                update.setInt(3, u.getId());
+                update.executeUpdate();
+
+                req.setAttribute("error", lockTime != null ? "Too many attempts. Locked for 15 mins." : "Invalid password. " + (3 - attempts) + " tries left.");
+                req.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(req, res);
             }
         } catch (Exception e) {
             e.printStackTrace();
-            request.setAttribute("error", "Something went wrong. Please try again.");
-            request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
+            req.setAttribute("error", "System error: " + e.getMessage());
+            req.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(req, res);
+        } finally {
+            if (conn != null) try { conn.close(); } catch (Exception ignored) {}
         }
     }
 
     @Override
-    protected void doGet(HttpServletRequest request, HttpServletResponse response) 
-            throws ServletException, IOException {
-        HttpSession session = request.getSession(false);
+    protected void doGet(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
+        HttpSession session = req.getSession(false);
         if (session != null && session.getAttribute("user") != null) {
             User u = (User) session.getAttribute("user");
-            String path = "admin".equals(u.getRole()) ? "/admin" : "/profile";
-            response.sendRedirect(request.getContextPath() + path);
-            return;
+            res.sendRedirect("admin".equals(u.getRole()) ? req.getContextPath() + "/admin" : req.getContextPath() + "/profile");
+        } else {
+            req.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(req, res);
         }
-        request.getRequestDispatcher("/WEB-INF/Pages/login.jsp").forward(request, response);
     }
 }
