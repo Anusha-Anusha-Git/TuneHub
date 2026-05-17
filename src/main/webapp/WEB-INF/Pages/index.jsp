@@ -55,15 +55,16 @@
         <div class="nav-c">
             <div class="logo">🎵 TuneHub</div>
             <nav>
-                <a href="${pageContext.request.contextPath}/">Home</a>
-                <% if (cu != null) { %>
-                    <a href="${pageContext.request.contextPath}/profile">Your Library</a>
-                    <a href="${pageContext.request.contextPath}/logout">Log out</a>
-                <% } else { %>
-                    <a href="${pageContext.request.contextPath}/login">Log in</a>
-                    <a href="${pageContext.request.contextPath}/register" class="btn-green">Sign up</a>
-                <% } %>
-            </nav>
+    <a href="${pageContext.request.contextPath}/">Home</a>
+    <% if (session.getAttribute("user") != null) { %>
+        <a href="${pageContext.request.contextPath}/profile">Dashboard</a>
+        <a href="${pageContext.request.contextPath}/reset">Edit Profile</a>
+        <a href="${pageContext.request.contextPath}/logout" onclick="return confirm('Are you sure you want to log out?')">Logout</a>
+    <% } else { %>
+        <a href="${pageContext.request.contextPath}/login">Log in</a>
+        <a href="${pageContext.request.contextPath}/register">Sign up</a>
+    <% } %>
+</nav>
         </div>
     </header>
 

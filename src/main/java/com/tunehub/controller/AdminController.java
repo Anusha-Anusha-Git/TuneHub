@@ -32,12 +32,20 @@ public class AdminController extends HttpServlet {
     protected void doGet(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {
         if (!check(req, res)) return;
 
+        String action = req.getParameter("action");
+        
+        // ✅ HANDLE ADMIN PROFILE EDIT → Use shared profile.jsp
+        if ("editProfile".equals(action)) {
+            req.setAttribute("fromAdmin", true); // Flag for profile.jsp to adjust form action
+            req.getRequestDispatcher("/WEB-INF/Pages/profile.jsp").forward(req, res);
+            return;
+        }
+
         Connection c = null;
         try {
             c = DBConfig.getConnection();
             
             // ✅ HANDLE EDIT SONG ACTION
-            String action = req.getParameter("action");
             if ("editSong".equals(action)) {
                 try {
                     int id = Integer.parseInt(req.getParameter("id"));
@@ -113,6 +121,34 @@ public class AdminController extends HttpServlet {
         Connection c = null; PreparedStatement ps = null;
         try {
             c = DBConfig.getConnection();
+            
+            // ✅ HANDLE ADMIN PROFILE UPDATE
+            if("updateAdminProfile".equals(act)) {
+                User admin = (User) req.getSession().getAttribute("user");
+                String newU = req.getParameter("username").trim();
+                String newE = req.getParameter("email").trim();
+                
+                if(newU.length()<3 || !newU.matches("^[a-zA-Z0-9_]{3,20}$") || !newE.matches("^[\\w.-]+@[\\w.-]+\\.[a-zA-Z]{2,}$")) {
+                    res.sendRedirect(req.getContextPath()+"/admin?action=editProfile&error=Invalid username/email format"); return;
+                }
+                
+                PreparedStatement chk = c.prepareStatement("SELECT 1 FROM users WHERE (username=? OR email=?) AND user_id!=?");
+                chk.setString(1,newU); chk.setString(2,newE); chk.setInt(3,admin.getId());
+                if(chk.executeQuery().next()) { 
+                    res.sendRedirect(req.getContextPath()+"/admin?action=editProfile&error=Username/Email taken"); return; 
+                }
+                chk.close();
+                
+                ps = c.prepareStatement("UPDATE users SET username=?, email=? WHERE user_id=?");
+                ps.setString(1, newU); ps.setString(2, newE); ps.setInt(3, admin.getId());
+                ps.executeUpdate();
+                
+                admin.setUsername(newU); admin.setEmail(newE);
+                req.getSession().setAttribute("user", admin);
+                res.sendRedirect(req.getContextPath()+"/admin?action=editProfile&success=Profile updated");
+                return;
+            }
+            
             if("saveSong".equals(act)) {
                 int id = 0; try{id=Integer.parseInt(req.getParameter("id"));}catch(Exception e){}
                 String t=req.getParameter("title"), a=req.getParameter("artist"), al=req.getParameter("album"), fp=req.getParameter("file_path");
